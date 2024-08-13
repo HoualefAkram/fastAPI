@@ -2,7 +2,7 @@ from .. import models, schemas
 from sqlalchemy.orm import Session
 from ..database import get_db
 from fastapi import Depends, status, HTTPException, APIRouter
-from typing import List
+from typing import List, Optional
 from .. import oauth2
 
 router = APIRouter(prefix="/posts", tags=["Posts"])
@@ -20,6 +20,12 @@ def delete_post(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="post not found"
         )
+    if post.owner_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to perform requested action",
+        )
+
     post_query.delete(synchronize_session=False)
     db.commit()
 
@@ -28,9 +34,18 @@ def delete_post(
 def get_posts(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(oauth2.get_current_user),
+    limit: int = 10,
+    skip: int = 0,
+    search: Optional[str] = "",
 ):
-    print(f"current_user: {current_user.email}")
-    posts = db.query(models.Post).all()
+    print(f"search: {search}")
+    posts = (
+        db.query(models.Post)
+        .filter(models.Post.title.contains(search))
+        .limit(limit)
+        .offset(skip)
+        .all()
+    )
     return posts
 
 
@@ -40,8 +55,7 @@ def create_post(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(oauth2.get_current_user),
 ):
-    print(current_user)
-    new_post = models.Post(**post.model_dump())
+    new_post = models.Post(owner_id=current_user.id, **post.model_dump())
     db.add(new_post)
     db.commit()
     db.refresh(new_post)
@@ -74,6 +88,11 @@ def update_post(
     if post == None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="post not found"
+        )
+    if post.owner_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to perform requested action",
         )
     post_query.update(updated_post.model_dump())
     db.commit()

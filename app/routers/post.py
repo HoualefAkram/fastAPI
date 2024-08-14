@@ -4,6 +4,7 @@ from ..database import get_db
 from fastapi import Depends, status, HTTPException, APIRouter
 from typing import List, Optional
 from .. import oauth2
+from sqlalchemy import func
 
 router = APIRouter(prefix="/posts", tags=["Posts"])
 
@@ -30,7 +31,7 @@ def delete_post(
     db.commit()
 
 
-@router.get("/", response_model=List[schemas.Post])
+@router.get("/", response_model=List[schemas.PostOut])
 def get_posts(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(oauth2.get_current_user),
@@ -38,15 +39,16 @@ def get_posts(
     skip: int = 0,
     search: Optional[str] = "",
 ):
-    print(f"search: {search}")
-    posts = (
-        db.query(models.Post)
+    results = (
+        db.query(models.Post, func.count(models.Vote.post_id).label("votes"))
+        .join(models.Vote, models.Post.id == models.Vote.post_id, isouter=True)
+        .group_by(models.Post.id)
         .filter(models.Post.title.contains(search))
         .limit(limit)
         .offset(skip)
         .all()
     )
-    return posts
+    return results
 
 
 @router.post("/", status_code=status.HTTP_201_CREATED, response_model=schemas.Post)
@@ -62,13 +64,19 @@ def create_post(
     return new_post
 
 
-@router.get("/{id}", response_model=schemas.Post)
+@router.get("/{id}", response_model=schemas.PostOut)
 def get_post(
     id: int,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(oauth2.get_current_user),
 ):
-    post = db.query(models.Post).filter(models.Post.id == id).first()
+    post = (
+        db.query(models.Post, func.count(models.Vote.post_id).label("votes"))
+        .join(models.Vote, models.Post.id == models.Vote.post_id, isouter=True)
+        .group_by(models.Post.id)
+        .filter(models.Post.id == id)
+        .first()
+    )
     if post == None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="post not found"
